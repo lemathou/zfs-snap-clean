@@ -24,7 +24,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DRY_RUN=0
 RECURSIVE=0
 VERBOSE=0
-CONFIG_FILE="${SCRIPT_DIR}/zfs-snap-clean.conf"
+CONFIG_FILE="${SCRIPT_DIR}/config/zfs-snap-clean.conf"
+LOG_DIR="${SCRIPT_DIR}/logs"
 CLI_LOG_DIR=""
 declare -A CLI_MIN_AGE
 
