@@ -14,7 +14,7 @@ _zfs_snap_clean() {
 
     local opts="-n --dry-run -r --recursive -v --verbose \
                 -c --config -a --min-age -l --log-dir -s --sep -h --help"
-    local freqs="hourly daily weekly monthly yearly"
+    local freqs="minutely hourly daily weekly monthly yearly"
 
     case "$prev" in
         -c|--config)
