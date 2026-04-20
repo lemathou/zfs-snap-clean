@@ -12,6 +12,8 @@
 #                              Units: h=hours d=days w=weeks m=months y=years
 #                              Can be repeated for multiple frequencies.
 #   -l, --log-dir <dir>        Write a timestamped log file in <dir> (overrides conf)
+#   -s, --sep <char>           Separator between prefix and snapshot suffix (default: ".")
+#                              Use "" for prefix-only names (no separator).
 #   -h, --help                 Show this help
 
 set -euo pipefail
@@ -57,6 +59,7 @@ while [[ $# -gt 0 ]]; do
             CLI_MIN_AGE["${2%%=*}"]="${2##*=}"
             shift ;;
         -l|--log-dir)   CLI_LOG_DIR="$2"; shift ;;
+        -s|--sep)       CLI_SNAP_SEP="$2"; shift ;;
         -h|--help)      usage 0 ;;
         -*)             echo "Unknown option: $1" >&2; usage 1 ;;
         *)              FILESYSTEMS+=("$1") ;;
@@ -83,6 +86,8 @@ source "$CONFIG_FILE"
 # shellcheck source=functions.sh
 source "${SCRIPT_DIR}/functions.sh"
 
+# CLI overrides for conf values.
+[[ -v CLI_SNAP_SEP ]] && SNAP_SEP="$CLI_SNAP_SEP"
 # CLI --log-dir overrides the value from conf.
 [[ -n "$CLI_LOG_DIR" ]] && LOG_DIR="$CLI_LOG_DIR"
 log_init "$0 $*"

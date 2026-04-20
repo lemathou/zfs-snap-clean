@@ -51,17 +51,23 @@ zfs_list_snapshots() {
 
 # ---------------------------------------------------------------------------
 # snap_frequency <snapshot_name>
-#   Returns the frequency key for a snapshot whose short name starts with a
-#   known prefix (e.g. "daily-…" or just "daily").
+#   Returns the frequency key for a snapshot whose short name matches a known
+#   prefix.  The separator between prefix and suffix is SNAP_SEP (default ".").
+#   When SNAP_SEP is empty, only an exact prefix match is accepted.
 #   Prints the matching key from FREQ_PREFIXES, or "" if unrecognised.
 # ---------------------------------------------------------------------------
 snap_frequency() {
     local snap="$1"
     local short="${snap##*@}"   # strip "fs@"
+    local sep="${SNAP_SEP-.}"   # default "." when variable is unset
     local freq prefix
     for freq in "${!FREQ_PREFIXES[@]}"; do
         prefix="${FREQ_PREFIXES[$freq]}"
-        if [[ "$short" == "$prefix" || "$short" == "${prefix}-"* ]]; then
+        # "${prefix}${sep}"* covers all cases:
+        #   sep="." → "daily.anything"  (sep required before suffix)
+        #   sep=""  → "daily" or "daily<anything>"  (suffix optional)
+        # The exact-match branch handles "daily" alone when sep is non-empty.
+        if [[ "$short" == "$prefix" || "$short" == "${prefix}${sep}"* ]]; then
             echo "$freq"
             return
         fi

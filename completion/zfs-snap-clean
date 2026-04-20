@@ -13,7 +13,7 @@ _zfs_snap_clean() {
     fi
 
     local opts="-n --dry-run -r --recursive -v --verbose \
-                -c --config -a --min-age -l --log-dir -h --help"
+                -c --config -a --min-age -l --log-dir -s --sep -h --help"
     local freqs="hourly daily weekly monthly yearly"
 
     case "$prev" in
@@ -32,6 +32,11 @@ _zfs_snap_clean() {
             else
                 COMPREPLY=( $(compgen -d -- "$cur") )
             fi
+            return ;;
+
+        -s|--sep)
+            # Common separators; empty string means no separator.
+            COMPREPLY=( $(compgen -W '. - _ ""' -- "$cur") )
             return ;;
 
         -a|--min-age)
