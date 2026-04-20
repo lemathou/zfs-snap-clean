@@ -4,10 +4,39 @@
 # ---------------------------------------------------------------------------
 # Logging helpers
 # ---------------------------------------------------------------------------
-_log()  { echo "[INFO]  $*" >&2; }
-_warn() { echo "[WARN]  $*" >&2; }
-_err()  { echo "[ERROR] $*" >&2; }
-_dbg()  { [[ "${VERBOSE:-0}" == "1" ]] && echo "[DEBUG] $*" >&2; }
+
+# Append a timestamped line to LOG_FILE when it is set.
+_write_log() { [[ -n "${LOG_FILE:-}" ]] && printf '[%s] %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" "$*" >> "$LOG_FILE"; }
+
+_log()  { echo "[INFO]  $*" >&2; _write_log "[INFO]  $*"; }
+_warn() { echo "[WARN]  $*" >&2; _write_log "[WARN]  $*"; }
+_err()  { echo "[ERROR] $*" >&2; _write_log "[ERROR] $*"; }
+_dbg()  { [[ "${VERBOSE:-0}" == "1" ]] && { echo "[DEBUG] $*" >&2; _write_log "[DEBUG] $*"; }; }
+
+# ---------------------------------------------------------------------------
+# log_init
+#   Initialises LOG_FILE from LOG_DIR.  Creates the directory if needed.
+#   Writes a run header.  Does nothing when LOG_DIR is empty.
+# ---------------------------------------------------------------------------
+log_init() {
+    if [[ -z "${LOG_DIR:-}" ]]; then
+        LOG_FILE=""
+        return 0
+    fi
+
+    if ! mkdir -p "$LOG_DIR" 2>/dev/null; then
+        echo "[WARN]  Cannot create log directory: $LOG_DIR" >&2
+        LOG_FILE=""
+        return 1
+    fi
+
+    LOG_FILE="${LOG_DIR}/zfs-snap-clean-$(date '+%Y%m%d-%H%M%S').log"
+    export LOG_FILE
+
+    printf '# zfs-snap-clean — %s\n' "$(date '+%Y-%m-%d %H:%M:%S')" >> "$LOG_FILE"
+    printf '# command : %s\n' "$0 $*"                                 >> "$LOG_FILE"
+    printf '# log file: %s\n' "$LOG_FILE"                             >> "$LOG_FILE"
+}
 
 # ---------------------------------------------------------------------------
 # zfs_list_snapshots <filesystem>

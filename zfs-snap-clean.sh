@@ -11,6 +11,7 @@
 #   -a, --min-age <freq=spec>  Override minimum age for a frequency (e.g. daily=7d, hourly=48h)
 #                              Units: h=hours d=days w=weeks m=months y=years
 #                              Can be repeated for multiple frequencies.
+#   -l, --log-dir <dir>        Write a timestamped log file in <dir> (overrides conf)
 #   -h, --help                 Show this help
 
 set -euo pipefail
@@ -24,6 +25,7 @@ DRY_RUN=0
 RECURSIVE=0
 VERBOSE=0
 CONFIG_FILE="${SCRIPT_DIR}/zfs-snap-clean.conf"
+CLI_LOG_DIR=""
 declare -A CLI_MIN_AGE
 
 export DRY_RUN VERBOSE CLI_MIN_AGE
@@ -53,6 +55,7 @@ while [[ $# -gt 0 ]]; do
             fi
             CLI_MIN_AGE["${2%%=*}"]="${2##*=}"
             shift ;;
+        -l|--log-dir)   CLI_LOG_DIR="$2"; shift ;;
         -h|--help)      usage 0 ;;
         -*)             echo "Unknown option: $1" >&2; usage 1 ;;
         *)              FILESYSTEMS+=("$1") ;;
@@ -78,6 +81,10 @@ source "$CONFIG_FILE"
 
 # shellcheck source=functions.sh
 source "${SCRIPT_DIR}/functions.sh"
+
+# CLI --log-dir overrides the value from conf.
+[[ -n "$CLI_LOG_DIR" ]] && LOG_DIR="$CLI_LOG_DIR"
+log_init "$0 $*"
 
 # ---------------------------------------------------------------------------
 # Main
