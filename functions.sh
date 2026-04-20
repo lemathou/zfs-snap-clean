@@ -11,17 +11,19 @@ _dbg()  { [[ "${VERBOSE:-0}" == "1" ]] && echo "[DEBUG] $*" >&2; }
 
 # ---------------------------------------------------------------------------
 # zfs_list_snapshots <filesystem>
-#   Prints snapshot names (short form: fs@snap) sorted oldest→newest.
+#   Prints tab-separated "name\tepoch" pairs sorted oldest→newest.
+#   The -p flag makes the creation column a Unix epoch (no locale issues).
 # ---------------------------------------------------------------------------
 zfs_list_snapshots() {
     local fs="$1"
-    zfs list -H -t snapshot -o name -s creation -r "$fs" 2>/dev/null \
+    zfs list -H -p -t snapshot -o name,creation -s creation -r "$fs" 2>/dev/null \
         | grep -E "^${fs}@"
 }
 
 # ---------------------------------------------------------------------------
 # snap_frequency <snapshot_name>
-#   Extracts the frequency prefix from a snapshot name like "fs@daily-2026-03-09".
+#   Returns the frequency key for a snapshot whose short name starts with a
+#   known prefix (e.g. "daily-…" or just "daily").
 #   Prints the matching key from FREQ_PREFIXES, or "" if unrecognised.
 # ---------------------------------------------------------------------------
 snap_frequency() {
@@ -30,46 +32,11 @@ snap_frequency() {
     local freq prefix
     for freq in "${!FREQ_PREFIXES[@]}"; do
         prefix="${FREQ_PREFIXES[$freq]}"
-        if [[ "$short" == "${prefix}-"* ]]; then
+        if [[ "$short" == "$prefix" || "$short" == "${prefix}-"* ]]; then
             echo "$freq"
             return
         fi
     done
-}
-
-# ---------------------------------------------------------------------------
-# snap_epoch <snapshot_name>
-#   Parses the date encoded in a snapshot name and returns a Unix epoch.
-#   Supported suffixes (after the frequency prefix):
-#     prefix-YYYY-MM-DD-HH   (hourly)
-#     prefix-YYYY-MM-DD      (daily / weekly with full date)
-#     prefix-YYYY-Www        (weekly ISO week, e.g. weekly-2026-W04)
-#     prefix-YYYY-MM         (monthly)
-#     prefix-YYYY            (yearly)
-#   Falls back to "zfs get creation" if the name cannot be parsed.
-# ---------------------------------------------------------------------------
-snap_epoch() {
-    local snap="$1"
-    local short="${snap##*@}"
-    local epoch
-
-    if [[ "$short" =~ ^[^-]+-([0-9]{4})-([0-9]{2})-([0-9]{2})-([0-9]{2})$ ]]; then
-        epoch=$(date -d "${BASH_REMATCH[1]}-${BASH_REMATCH[2]}-${BASH_REMATCH[3]} ${BASH_REMATCH[4]}:00:00" +%s 2>/dev/null)
-    elif [[ "$short" =~ ^[^-]+-([0-9]{4})-([0-9]{2})-([0-9]{2})$ ]]; then
-        epoch=$(date -d "${BASH_REMATCH[1]}-${BASH_REMATCH[2]}-${BASH_REMATCH[3]}" +%s 2>/dev/null)
-    elif [[ "$short" =~ ^[^-]+-([0-9]{4})-W([0-9]{2})$ ]]; then
-        epoch=$(date -d "${BASH_REMATCH[1]}-W${BASH_REMATCH[2]}-1" +%s 2>/dev/null)
-    elif [[ "$short" =~ ^[^-]+-([0-9]{4})-([0-9]{2})$ ]]; then
-        epoch=$(date -d "${BASH_REMATCH[1]}-${BASH_REMATCH[2]}-01" +%s 2>/dev/null)
-    elif [[ "$short" =~ ^[^-]+-([0-9]{4})$ ]]; then
-        epoch=$(date -d "${BASH_REMATCH[1]}-01-01" +%s 2>/dev/null)
-    fi
-
-    if [[ -z "$epoch" ]]; then
-        epoch=$(zfs get -H -p -o value creation "$snap" 2>/dev/null)
-    fi
-
-    echo "${epoch:-0}"
 }
 
 # ---------------------------------------------------------------------------
@@ -143,23 +110,24 @@ get_retain() {
 }
 
 # ---------------------------------------------------------------------------
-# snapshots_to_delete <filesystem> [snapshots_list_on_stdin]
-#   Reads newline-separated snapshot names from stdin (oldest→newest),
-#   groups them by frequency, and prints those that exceed the retention limit.
+# snapshots_to_delete <filesystem>
+#   Reads tab-separated "name\tepoch" pairs from stdin (oldest→newest),
+#   groups them by frequency, and prints the names that exceed the retention
+#   limit and are old enough to be deleted.
 #   Snapshots with unknown prefixes are never touched.
 # ---------------------------------------------------------------------------
 snapshots_to_delete() {
     local fs="$1"
     local -A by_freq=()
 
-    while IFS= read -r snap; do
+    while IFS=$'\t' read -r snap epoch; do
         local freq
         freq="$(snap_frequency "$snap")"
         if [[ -z "$freq" ]]; then
             _dbg "Skipping unrecognised snapshot: $snap"
             continue
         fi
-        by_freq[$freq]+="${snap}"$'\n'
+        by_freq[$freq]+="${snap}"$'\t'"${epoch}"$'\n'
     done
 
     local freq
@@ -172,13 +140,13 @@ snapshots_to_delete() {
             continue
         fi
 
-        # Snapshots are oldest→newest; keep the last $retain, delete the rest.
-        local snaps=()
-        while IFS= read -r s; do
-            [[ -n "$s" ]] && snaps+=("$s")
+        # Build parallel arrays of names and epochs (oldest→newest).
+        local names=() epochs=()
+        while IFS=$'\t' read -r name epoch; do
+            [[ -n "$name" ]] && names+=("$name") && epochs+=("$epoch")
         done <<< "${by_freq[$freq]}"
 
-        local total="${#snaps[@]}"
+        local total="${#names[@]}"
         if (( total <= retain )); then
             _dbg "$fs [$freq] $total/$retain — nothing to delete"
             continue
@@ -191,17 +159,14 @@ snapshots_to_delete() {
         min_age_secs="$(get_min_age "$freq")"
         now="$(date +%s)"
 
-        local s
-        for s in "${snaps[@]:0:$to_remove}"; do
-            if (( min_age_secs > 0 )); then
-                local epoch
-                epoch="$(snap_epoch "$s")"
-                if (( epoch > 0 && now - epoch < min_age_secs )); then
-                    _dbg "Protecting $s (age $(( (now - epoch) / 86400 ))d < threshold $(( min_age_secs / 86400 ))d)"
-                    continue
-                fi
+        local i
+        for (( i = 0; i < to_remove; i++ )); do
+            local snap="${names[$i]}" epoch="${epochs[$i]}"
+            if (( min_age_secs > 0 && epoch > 0 && now - epoch < min_age_secs )); then
+                _dbg "Protecting $snap (age $(( (now - epoch) / 3600 ))h < threshold $(( min_age_secs / 3600 ))h)"
+                continue
             fi
-            echo "$s"
+            echo "$snap"
         done
     done
 }
